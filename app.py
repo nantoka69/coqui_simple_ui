@@ -39,15 +39,29 @@ class StreamRedirector:
     def write(self, text):
         # Strip ANSI codes
         clean_text = self.ansi_escape.sub('', text)
+        if not clean_text:
+            return
+
+        # Split by newline first
+        lines = clean_text.split('\n')
         
-        # Handle carriage return: if it contains \r, only take the text after the last \r
-        # We emit a special flag for \r to allow the UI to overwrite the last line
-        replace = '\r' in clean_text
-        if replace:
-            clean_text = clean_text.split('\r')[-1]
+        for i, line in enumerate(lines):
+            is_last = (i == len(lines) - 1)
             
-        if clean_text.strip():
-            self.signal.emit(clean_text.strip(), replace)
+            # Handle carriage returns within the segment
+            if '\r' in line:
+                parts = line.split('\r')
+                # Take the last non-empty part to show current progress
+                display_line = next((p for p in reversed(parts) if p), "")
+                # If we have a trailing \r or the specific content contains a \r, mark for replacement
+                replace = True
+            else:
+                display_line = line
+                replace = False
+            
+            # Emit if there's content or it's a newline (not the last empty segment)
+            if display_line or (not is_last):
+                self.signal.emit(display_line, replace)
 
     def flush(self):
         pass
@@ -98,14 +112,37 @@ class TTSWorker(QThread):
             all_wavs = []
             import numpy as np
             
-            # Only use speaker_wav if the model is multi-speaker
-            use_speaker = self.speaker_wav if self.speaker_wav and tts.is_multi_speaker else None
+            # Smart speaker selection for multi-speaker models
+            use_speaker_wav = None
+            use_speaker_id = None
             
+            if tts.is_multi_speaker:
+                if self.speaker_wav and os.path.exists(self.speaker_wav):
+                    use_speaker_wav = self.speaker_wav
+                    self.log_signal.emit(f"<b>[STATUS]</b> Using speaker reference: {os.path.basename(use_speaker_wav)}", False)
+                else:
+                    # Try to find a default speaker ID
+                    if hasattr(tts, "speakers") and tts.speakers:
+                        use_speaker_id = tts.speakers[0]
+                    elif "xtts" in self.model_name.lower():
+                        use_speaker_id = "Claribel Dervla"
+                    
+                    if use_speaker_id:
+                        self.log_signal.emit(f"<b>[STATUS]</b> No reference WAV provided. Using default speaker ID: {use_speaker_id}", False)
+                    else:
+                        self.log_signal.emit("<b>[WARNING]</b> Multi-speaker model detected but no speaker reference or ID found. It might fail.", False)
+
             for i, sentence in enumerate(sentences):
                 # Emit with 'replace=True' to keep the console clean
                 self.log_signal.emit(f"<b>[PROG]</b> Processing segment {i+1}/{total}...", True)
-                # tts.tts returns a list of floats (the waveform)
-                wav = tts.tts(text=sentence, speaker_wav=use_speaker)
+                # tts.tts handles both speaker (ID) and speaker_wav (file)
+                # We dynamically pass the language for XTTS if it's multilingual
+                language = "en" # Default to English, could be made a setting later
+                if "multilingual" in self.model_name.lower() or "xtts" in self.model_name.lower():
+                    wav = tts.tts(text=sentence, speaker=use_speaker_id, speaker_wav=use_speaker_wav, language=language)
+                else:
+                    wav = tts.tts(text=sentence, speaker=use_speaker_id, speaker_wav=use_speaker_wav)
+                
                 all_wavs.append(wav)
             
             self.log_signal.emit(f"<b>[STATUS]</b> Synthesis complete. Concatenating {len(all_wavs)} waves...", False)
@@ -211,25 +248,34 @@ class MainWindow(QWidget):
         self.setLayout(layout)
         self.log("Ready")
 
-    def log(self, message, color="#00ff00", replace=False):
-        """Append a message to the console window. If replace=True, replaces the last line if it's a progress line."""
+    def log(self, message, color="#00ff00", replace=False, is_lib=False):
+        """Append a message to the console window. If replace=True, replaces the last block."""
+        
+        # 1. Escape HTML special characters in the raw message content
+        # This prevents characters like < and > in progress bars from being eaten by Qt's HTML renderer
+        clean_msg = message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        
+        # 2. Add formatting (bold tags, prefixes) AFTER escaping the content
+        if is_lib:
+            formatted_msg = f'<b>[LIB]</b> {clean_msg}'
+        else:
+            formatted_msg = clean_msg # Already contains tags if it was one of our <b>[STATUS]</b> logs
+
         cursor = self.console_output.textCursor()
         cursor.movePosition(cursor.MoveOperation.End)
         
         if replace:
-            # Check if the last line contains [PROG] or was marked for replacement
-            # This prevents overwriting [LIB] logs that might have appeared since the last [PROG]
-            cursor.movePosition(cursor.MoveOperation.StartOfLine, cursor.MoveMode.KeepAnchor)
-            last_line = cursor.selectedText()
-            if "[PROG]" in last_line or "Processing" in last_line:
-                cursor.removeSelectedText()
-                cursor.deletePreviousChar() # remove the newline
-                self.console_output.setTextCursor(cursor)
-            else:
-                # If the last line wasn't a progress line, don't replace, just append normally
-                pass
+            # Shift selection to the start of the current last block (logical paragraph)
+            # This handles wrapped lines correctly, unlike StartOfLine
+            cursor.movePosition(cursor.MoveOperation.StartOfBlock, cursor.MoveMode.KeepAnchor)
+            
+            if cursor.hasSelection():
+                # OVERWRITE the selected block using insertHtml instead of remove + append
+                # This prevents the accumulation of empty paragraph blocks
+                cursor.insertHtml(f'<span style="color: {color}; font-family: \'Consolas\', \'Monaco\', \'Courier New\', monospace;">{formatted_msg}</span>')
+                return
 
-        self.console_output.append(f'<span style="color: {color};">{message}</span>')
+        self.console_output.append(f'<span style="color: {color};">{formatted_msg}</span>')
         # Auto-scroll to bottom
         self.console_output.moveCursor(self.console_output.textCursor().MoveOperation.End)
 
@@ -288,7 +334,7 @@ class MainWindow(QWidget):
         self.worker = TTSWorker(text, model, vocoder, speaker, output)
         self.worker.finished.connect(self.on_tts_finished)
         self.worker.error.connect(self.on_tts_error)
-        self.worker.log_signal.connect(lambda msg, rep: self.log(msg if "</b>" in msg else f"<b>[LIB]</b> {msg}", "#9ca3af" if "</b>" not in msg else "#00ff00", rep))
+        self.worker.log_signal.connect(lambda msg, rep: self.log(msg, "#9ca3af" if "</b>" not in msg else "#00ff00", rep, is_lib=("</b>" not in msg)))
         self.worker.start()
 
     def on_tts_finished(self, output_path):
