@@ -2,11 +2,54 @@ import sys
 import os
 import re
 import collections
+import json
 from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
                              QTextEdit, QPushButton, QLabel, QMessageBox, 
-                             QSplashScreen, QComboBox, QFileDialog, QLineEdit, QFormLayout)
+                             QSplashScreen, QComboBox, QFileDialog, QLineEdit, QFormLayout,
+                             QStackedWidget)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QPixmap, QColor, QLinearGradient, QPainter, QFont
+
+# --- Config Management ---
+class ConfigManager:
+    def __init__(self):
+        self.app_data_dir = os.path.join(os.environ.get('APPDATA', os.getcwd()), "CoquiSimpleUI")
+        os.makedirs(self.app_data_dir, exist_ok=True)
+        self.cache_path = os.path.join(self.app_data_dir, "models_cache.json")
+        self.cache = self.load_cache()
+
+    def load_cache(self):
+        if os.path.exists(self.cache_path):
+            try:
+                with open(self.cache_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except:
+                pass
+        return {"models": {}}
+
+    def save_cache(self):
+        with open(self.cache_path, "w", encoding="utf-8") as f:
+            json.dump(self.cache, f, indent=4)
+
+    def get_model_info(self, model_name):
+        return self.cache["models"].get(model_name, {"status": "unknown", "speakers": []})
+
+    def update_model(self, model_name, status, speakers=None):
+        if model_name not in self.cache["models"]:
+            self.cache["models"][model_name] = {}
+        self.cache["models"][model_name]["status"] = status
+        if speakers is not None:
+            self.cache["models"][model_name]["speakers"] = speakers
+        self.save_cache()
+
+    def sync_models(self, t_models):
+        changed = False
+        for m in t_models:
+            if m not in self.cache["models"]:
+                self.cache["models"][m] = {"status": "unknown", "speakers": []}
+                changed = True
+        if changed:
+            self.save_cache()
 
 class ModelFetcher(QThread):
     finished = pyqtSignal(list, list)
@@ -14,17 +57,72 @@ class ModelFetcher(QThread):
 
     def run(self):
         try:
-            from TTS.api import TTS
-            # Get the ModelManager
-            manager = TTS().list_models()
-            # Get the actual list of model names
+            from TTS.utils.manage import ModelManager
+            manager = ModelManager()
             models = manager.list_models()
             
-            # Group into tts and vocoders
             t_models = [m for m in models if m.startswith("tts_models/")]
             v_models = [m for m in models if m.startswith("vocoder_models/")]
             
-            self.finished.emit(t_models, v_models)
+            # Identify which models are already local
+            def is_local(m_name):
+                folder_name = m_name.replace("/", "--")
+                local_path = os.path.join(manager.output_prefix, folder_name)
+                return os.path.exists(os.path.join(local_path, "config.json"))
+
+            processed_t = []
+            for m in t_models:
+                if is_local(m):
+                    processed_t.append(f"{m} [Loaded]")
+                else:
+                    processed_t.append(m)
+
+            self.finished.emit(processed_t, v_models)
+        except Exception as e:
+            self.error.emit(str(e))
+
+class SpeakerFetcher(QThread):
+    finished = pyqtSignal(str, str, list) # model_name, status, speakers
+    error = pyqtSignal(str)
+
+    def __init__(self, model_name):
+        super().__init__()
+        self.model_name = model_name
+
+    def run(self):
+        try:
+            from TTS.api import TTS
+            # Initialize TTS just to peek at speakers (gpu=False for speed/silence)
+            tts = TTS(model_name=self.model_name, progress_bar=False, gpu=False)
+            
+            if tts.is_multi_speaker:
+                speakers = []
+                # 1. Standard TTS models
+                if hasattr(tts, "speakers") and tts.speakers:
+                    speakers = tts.speakers
+                # 2. Some models put it in speaker_manager directly
+                elif hasattr(tts, "speaker_manager") and tts.speaker_manager:
+                     if hasattr(tts.speaker_manager, "speaker_names"):
+                        speakers = list(tts.speaker_manager.speaker_names)
+                     elif hasattr(tts.speaker_manager, "name_to_id"):
+                        # Handle both dict (keys) and dict_keys object
+                        val = tts.speaker_manager.name_to_id
+                        speakers = list(val.keys()) if isinstance(val, dict) else list(val)
+                # 3. XTTS specific location (synthesizer -> tts_model -> speaker_manager)
+                elif hasattr(tts, "synthesizer") and hasattr(tts.synthesizer, "tts_model"):
+                     if hasattr(tts.synthesizer.tts_model, "speaker_manager"):
+                          sm = tts.synthesizer.tts_model.speaker_manager
+                          if hasattr(sm, "speaker_names"):
+                               speakers = list(sm.speaker_names)
+                          elif hasattr(sm, "name_to_id"):
+                               val = sm.name_to_id
+                               speakers = list(val.keys()) if isinstance(val, dict) else list(val)
+                
+                self.finished.emit(self.model_name, "multi", speakers)
+
+                self.finished.emit(self.model_name, "multi", speakers)
+            else:
+                self.finished.emit(self.model_name, "single", [])
         except Exception as e:
             self.error.emit(str(e))
 
@@ -77,6 +175,7 @@ class TTSWorker(QThread):
         self.model_name = model_name
         self.vocoder_name = vocoder_name
         self.speaker_wav = speaker_wav
+        self.speaker_id = None # Set externally
         self.output_path = output_path
 
     def run(self):
@@ -120,6 +219,9 @@ class TTSWorker(QThread):
                 if self.speaker_wav and os.path.exists(self.speaker_wav):
                     use_speaker_wav = self.speaker_wav
                     self.log_signal.emit(f"<b>[STATUS]</b> Using speaker reference: {os.path.basename(use_speaker_wav)}", False)
+                elif self.speaker_id:
+                    use_speaker_id = self.speaker_id
+                    self.log_signal.emit(f"<b>[STATUS]</b> Using internal speaker: {use_speaker_id}", False)
                 else:
                     # Try to find a default speaker ID
                     if hasattr(tts, "speakers") and tts.speakers:
@@ -128,7 +230,7 @@ class TTSWorker(QThread):
                         use_speaker_id = "Claribel Dervla"
                     
                     if use_speaker_id:
-                        self.log_signal.emit(f"<b>[STATUS]</b> No reference WAV provided. Using default speaker ID: {use_speaker_id}", False)
+                        self.log_signal.emit(f"<b>[STATUS]</b> Using default speaker ID: {use_speaker_id}", False)
                     else:
                         self.log_signal.emit("<b>[WARNING]</b> Multi-speaker model detected but no speaker reference or ID found. It might fail.", False)
 
@@ -163,6 +265,10 @@ class MainWindow(QWidget):
         super().__init__()
         self.t_models = t_models
         self.v_models = v_models
+        self.config = ConfigManager()
+        # Sync current model list with cache
+        clean_models = [m.replace(" [Loaded]", "") for m in t_models]
+        self.config.sync_models(clean_models)
         self.init_ui()
 
     def init_ui(self):
@@ -183,11 +289,18 @@ class MainWindow(QWidget):
         # Model Selection
         self.combo_model = QComboBox()
         self.combo_model.setEditable(False)
-        self.combo_model.addItems(self.t_models)
+        for m in self.t_models:
+             # Store real name in userData
+             real_name = m.replace(" [Loaded]", "")
+             self.combo_model.addItem(m, real_name)
+        
         # Default to a common model
-        default_idx = self.combo_model.findText("tts_models/en/ljspeech/vits")
+        default_idx = self.combo_model.findText("tts_models/en/ljspeech/vits [Loaded]")
+        if default_idx == -1:
+            default_idx = self.combo_model.findText("tts_models/en/ljspeech/vits")
         if default_idx >= 0:
             self.combo_model.setCurrentIndex(default_idx)
+        self.combo_model.currentIndexChanged.connect(self.on_model_changed)
         form_layout.addRow("Model:", self.combo_model)
 
         # Vocoder Selection
@@ -197,14 +310,34 @@ class MainWindow(QWidget):
         self.combo_vocoder.addItems(self.v_models)
         form_layout.addRow("Vocoder (Optional):", self.combo_vocoder)
 
+        # Dynamic Speaker Selection Area
+        self.speaker_stack = QStackedWidget()
+        
+        # Page 0: Load Button
+        self.btn_load_speakers = QPushButton("Load speaker IDs if available")
+        self.btn_load_speakers.clicked.connect(self.on_load_speakers_clicked)
+        self.speaker_stack.addWidget(self.btn_load_speakers)
+        
+        # Page 1: Speaker Combo
+        self.combo_internal_speaker = QComboBox()
+        self.speaker_stack.addWidget(self.combo_internal_speaker)
+        
+        # Page 2: Single Speaker Label
+        self.lbl_single_speaker = QLabel("Single speaker model")
+        self.lbl_single_speaker.setStyleSheet("color: #9ca3af; font-style: italic;")
+        self.speaker_stack.addWidget(self.lbl_single_speaker)
+        
+        form_layout.addRow("Speaker (Internal):", self.speaker_stack)
+
         # Speaker Wave (for cloning)
         speaker_layout = QHBoxLayout()
         self.edit_speaker = QLineEdit()
+        self.edit_speaker.setPlaceholderText("Optional WAV for voice cloning")
         self.btn_browse_speaker = QPushButton("Browse...")
         self.btn_browse_speaker.clicked.connect(self.browse_speaker)
         speaker_layout.addWidget(self.edit_speaker)
         speaker_layout.addWidget(self.btn_browse_speaker)
-        form_layout.addRow("Speaker Reference (Optional WAV):", speaker_layout)
+        form_layout.addRow("Speaker Reference (External WAV):", speaker_layout)
 
 
         # Output File
@@ -222,7 +355,6 @@ class MainWindow(QWidget):
         form_layout.addRow("Output File:", output_layout)
 
         layout.addLayout(form_layout)
-
 
         # Generate Button
         self.btn_generate = QPushButton("Generate Speech")
@@ -246,6 +378,8 @@ class MainWindow(QWidget):
         layout.addWidget(self.console_output)
 
         self.setLayout(layout)
+        # Trigger initial speaker UI state
+        self.on_model_changed()
         self.log("Ready")
 
     def log(self, message, color="#00ff00", replace=False, is_lib=False):
@@ -278,6 +412,49 @@ class MainWindow(QWidget):
         self.console_output.append(f'<span style="color: {color};">{formatted_msg}</span>')
         # Auto-scroll to bottom
         self.console_output.moveCursor(self.console_output.textCursor().MoveOperation.End)
+
+    def on_model_changed(self):
+        model_name = self.combo_model.currentData()
+        if not model_name:
+            return
+            
+        info = self.config.get_model_info(model_name)
+        status = info["status"]
+        
+        if status == "unknown":
+            self.speaker_stack.setCurrentIndex(0) # Show Load Button
+            self.btn_load_speakers.setText("Load speaker IDs if available")
+            self.btn_load_speakers.setEnabled(True)
+        elif status == "single":
+            self.speaker_stack.setCurrentIndex(2) # Show Label
+        elif status == "multi":
+            self.speaker_stack.setCurrentIndex(1) # Show Combo
+            self.combo_internal_speaker.clear()
+            for i, spk in enumerate(info["speakers"]):
+                self.combo_internal_speaker.addItem(f"[{i}] {spk}", spk)
+
+    def on_load_speakers_clicked(self):
+        model_name = self.combo_model.currentData()
+        if not model_name:
+            return
+            
+        self.btn_load_speakers.setText("Loading... (Windows may flash)")
+        self.btn_load_speakers.setEnabled(False)
+        
+        self.fetcher = SpeakerFetcher(model_name)
+        self.fetcher.finished.connect(self.on_speakers_fetched)
+        self.fetcher.error.connect(self.on_speaker_error)
+        self.fetcher.start()
+
+    def on_speakers_fetched(self, model_name, status, speakers):
+        self.config.update_model(model_name, status, speakers)
+        # If the currently selected model is still this one, update UI
+        if self.combo_model.currentData() == model_name:
+            self.on_model_changed()
+
+    def on_speaker_error(self, err):
+        QMessageBox.warning(self, "Load Error", f"Could not load speaker list:\n{err}")
+        self.on_model_changed()
 
     def log_input(self, model, vocoder, speaker, output, text):
         """Log the command configuration."""
@@ -318,20 +495,43 @@ class MainWindow(QWidget):
             QMessageBox.warning(self, "Warning", "Please enter some text.")
             return
 
-        model = self.combo_model.currentText().strip()
+        model = self.combo_model.currentData()
         vocoder = self.combo_vocoder.currentText().strip()
-        speaker = self.edit_speaker.text().strip()
+        speaker_wav = self.edit_speaker.text().strip()
+        speaker_id = self.combo_internal_speaker.currentData() if self.speaker_stack.currentIndex() == 1 else None
         output = self.edit_output.text().strip()
 
         if not model:
-            QMessageBox.warning(self, "Warning", "Please select or enter a model.")
+            QMessageBox.warning(self, "Warning", "Please select a model.")
             return
 
-        self.btn_generate.setEnabled(False)
-        self.log_input(model, vocoder, speaker, output, text)
-        self.log("<b>[STATUS]</b> Initializing TTS Engine...", "#facc15")
+        # Explicit validation for missing multi-speaker selection
+        info = self.config.get_model_info(model)
+        if info["status"] == "unknown":
+             # We don't know yet, but if it's XTTS we suspect multi
+             if "xtts" in model or "multilingual" in model:
+                  QMessageBox.critical(self, "Speaker Required", "Download speaker list and select a speaker index.")
+                  return
+        elif info["status"] == "multi" and not speaker_id and not speaker_wav:
+             QMessageBox.critical(self, "Speaker Required", "Please select a speaker from the dropdown or provide a reference WAV.")
+             return
 
-        self.worker = TTSWorker(text, model, vocoder, speaker, output)
+        self.btn_generate.setEnabled(False)
+        
+        # Determine logical speaker name for logging
+        log_speaker = "Default"
+        if speaker_wav:
+            log_speaker = f"WAV: {os.path.basename(speaker_wav)}"
+        elif speaker_id:
+            log_speaker = f"ID: {speaker_id}"
+
+        self.log_input(model, vocoder, log_speaker, output, text)
+        self.log("<b>[STATUS]</b> Initializing TTS Engine...", "#facc15")
+        self.log("<i>Note: External WAV takes precedence over internal ID.</i>", "#9ca3af")
+
+        self.worker = TTSWorker(text, model, vocoder, speaker_wav, output)
+        # Update worker to handle the internal speaker ID (need to modify TTSWorker)
+        self.worker.speaker_id = speaker_id 
         self.worker.finished.connect(self.on_tts_finished)
         self.worker.error.connect(self.on_tts_error)
         self.worker.log_signal.connect(lambda msg, rep: self.log(msg, "#9ca3af" if "</b>" not in msg else "#00ff00", rep, is_lib=("</b>" not in msg)))
