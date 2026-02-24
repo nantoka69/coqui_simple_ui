@@ -39,7 +39,7 @@ An `ImportError` related to `BeamSearchScorer` often occurs when using XTTS v2 d
 #### Fix Bark Model Crashing (`invalid load key, '<'`)
 The Bark model downloads a broken HTML page instead of the actual weights due to incorrect URLs generated in its configuration.
 - **Fix:** 
-  1. Open the local config file: `C:\Users\User\AppData\Local\tts\tts_models--multilingual--multi-dataset--bark\config.json`.
+  1. Open the local config file: `C:\Users\<User\AppData\Local\tts\tts_models--multilingual--multi-dataset--bark\config.json`.
   2. Change the broken raw model URL to use the direct download link:
      - **Old:** `https://huggingface.co/erogol/bark/tree/main/text_2.pt`
      - **New:** `https://huggingface.co/suno/bark/resolve/main/text_2.pt`
