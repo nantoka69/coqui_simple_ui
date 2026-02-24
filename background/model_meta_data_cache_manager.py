@@ -1,15 +1,10 @@
 import os
 import json
+from . import MODEL_CACHE_PATH
 
 class ModelMetaDataCacheManager:
-    APP_FOLDER_NAME = "CoquiSimpleUI"
-    MODEL_META_DATA_CACHE_FILE_NAME = "mode_meta_data_cache.json"
 
     def __init__(self):
-        self.app_data_dir = os.path.join(os.environ.get('APPDATA', os.getcwd()), self.APP_FOLDER_NAME)
-        os.makedirs(self.app_data_dir, exist_ok=True)
-
-        self.cache_path = os.path.join(self.app_data_dir, self.MODEL_META_DATA_CACHE_FILE_NAME)
         self.cache = self.__load_cache()
 
     def get_model_info(self, model_name):
@@ -33,14 +28,14 @@ class ModelMetaDataCacheManager:
             self.__save_cache()
 
     def __load_cache(self):
-        if os.path.exists(self.cache_path):
+        if os.path.exists(MODEL_CACHE_PATH):
             try:
-                with open(self.cache_path, "r", encoding="utf-8") as f:
+                with open(MODEL_CACHE_PATH, "r", encoding="utf-8") as f:
                     return json.load(f)
             except:
                 pass
         return {"models": {}}
 
     def __save_cache(self):
-        with open(self.cache_path, "w", encoding="utf-8") as f:
+        with open(MODEL_CACHE_PATH, "w", encoding="utf-8") as f:
             json.dump(self.cache, f, indent=4)

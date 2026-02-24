@@ -4,6 +4,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
                              QComboBox, QFileDialog, QLineEdit, QFormLayout,
                              QStackedWidget)
 from background.model_meta_data_cache_manager import ModelMetaDataCacheManager
+from . import settings
 from background.speaker_fetcher import SpeakerFetcher
 from background.tts_worker import TTSWorker
 
@@ -12,11 +13,11 @@ class MainWindow(QWidget):
         super().__init__()
         self.tts_model_names = tts_model_names
         self.vocoder_model_names = vocoder_model_names
-        clean_tts_model_names = [m.replace(" [Loaded]", "") for m in tts_model_names]
+        self.clean_tts_model_names = [m.replace(" [Loaded]", "") for m in tts_model_names]
         
         # Sync current model list with cache
         self.config = ModelMetaDataCacheManager()
-        self.config.sync_models(clean_tts_model_names)
+        self.config.sync_models(self.clean_tts_model_names)
         
         self.init_ui()
 
@@ -38,17 +39,16 @@ class MainWindow(QWidget):
         # Model Selection
         self.combo_model = QComboBox()
         self.combo_model.setEditable(False)
-        for m in self.tts_model_names:
-             # Store real name in userData
-             real_name = m.replace(" [Loaded]", "")
-             self.combo_model.addItem(m, real_name)
+        for display_name, real_name in zip(self.tts_model_names, self.clean_tts_model_names):
+             self.combo_model.addItem(display_name, real_name)
         
-        # Default to a common model
-        default_idx = self.combo_model.findText("tts_models/en/ljspeech/vits [Loaded]")
+        # Default to a saved model or first entry
+        last_model = settings.get_setting("last_model")
+        default_idx = self.combo_model.findData(last_model) if last_model else -1
         if default_idx == -1:
-            default_idx = self.combo_model.findText("tts_models/en/ljspeech/vits")
-        if default_idx >= 0:
-            self.combo_model.setCurrentIndex(default_idx)
+            default_idx = 0
+            
+        self.combo_model.setCurrentIndex(default_idx)
         self.combo_model.currentIndexChanged.connect(self.on_model_changed)
         form_layout.addRow("Model:", self.combo_model)
 
@@ -57,6 +57,16 @@ class MainWindow(QWidget):
         self.combo_vocoder.setEditable(False)
         self.combo_vocoder.addItem("") # Optional
         self.combo_vocoder.addItems(self.vocoder_model_names)
+        
+        # Default to a saved vocoder or first entry (empty)
+        last_vocoder = settings.get_setting("last_vocoder")
+        vocoder_idx = self.combo_vocoder.findText(last_vocoder) if last_vocoder else -1
+        if vocoder_idx == -1:
+            vocoder_idx = 0
+            
+        self.combo_vocoder.setCurrentIndex(vocoder_idx)
+        self.combo_vocoder.currentIndexChanged.connect(self.on_vocoder_changed)
+        
         form_layout.addRow("Vocoder (Optional):", self.combo_vocoder)
 
         # Dynamic Speaker Selection Area
@@ -167,6 +177,9 @@ class MainWindow(QWidget):
         if not model_name:
             return
             
+        # Save selection
+        settings.set_setting("last_model", model_name)
+            
         info = self.config.get_model_info(model_name)
         status = info["status"]
         
@@ -181,6 +194,10 @@ class MainWindow(QWidget):
             self.combo_internal_speaker.clear()
             for i, spk in enumerate(info["speakers"]):
                 self.combo_internal_speaker.addItem(f"[{i}] {spk}", spk)
+
+    def on_vocoder_changed(self):
+        vocoder_name = self.combo_vocoder.currentText().strip()
+        settings.set_setting("last_vocoder", vocoder_name)
 
     def on_load_speakers_clicked(self):
         model_name = self.combo_model.currentData()
