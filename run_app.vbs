@@ -1,13 +1,15 @@
 Set WshShell = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
 strPath = fso.GetParentFolderName(WScript.ScriptFullName)
-strUserProf = WshShell.ExpandEnvironmentStrings("%USERPROFILE%")
-strConda = strUserProf & "\miniconda3\Scripts\conda.exe"
 
-' Construct command: "C:\...\conda.exe" run -n coqui_env --no-capture-output pythonw.exe "C:\...\app.py"
-strArgs = """" & strConda & """ run -n coqui_env --no-capture-output pythonw.exe """ & strPath & "\app.py"""
+' Launch run_app.ps1 in a hidden PowerShell window.
+' The PS1 activates the conda env, then detaches pythonw.exe via Start-Process and exits.
+strPS1 = strPath & "\run_app.ps1"
+strCmd = "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File """ & strPS1 & """"
 
-' Run hidden (0) and don't wait (False)
-WshShell.Run strArgs, 0, False
+WshShell.Run strCmd, 0, False
+
+
+
 
 
