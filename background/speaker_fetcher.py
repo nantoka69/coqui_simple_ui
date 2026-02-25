@@ -38,8 +38,6 @@ class SpeakerFetcher(QThread):
                                speakers = list(val.keys()) if isinstance(val, dict) else list(val)
                 
                 self.finished.emit(self.model_name, "multi", speakers)
-
-                self.finished.emit(self.model_name, "multi", speakers)
             else:
                 self.finished.emit(self.model_name, "single", [])
         except Exception as e:
