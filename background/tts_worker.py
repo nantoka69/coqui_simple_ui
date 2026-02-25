@@ -3,6 +3,7 @@ import os
 import re
 from PyQt6.QtCore import QThread, pyqtSignal
 from background.stream_redirector import StreamRedirector
+from . import import_and_monkey_patch_torch
 
 class TTSWorker(QThread):
     finished = pyqtSignal(str)
@@ -24,8 +25,7 @@ class TTSWorker(QThread):
         try:
             from TTS.api import TTS
             import numpy as np
-            import torch
-            self.__monkey_patch_torch_load(torch)
+            import_and_monkey_patch_torch()
             
             # Redirect stdout/stderr for this thread
             sys.stdout = StreamRedirector(self.log_signal)
@@ -72,16 +72,6 @@ class TTSWorker(QThread):
         """Split text into sentences/segments using an aggressive regex."""
         segments = re.split(r'[\n\r]+|(?<=[.!?])\s+', text)
         return [s.strip() for s in segments if s.strip()]
-
-    def __monkey_patch_torch_load(self, torch):
-        """Monkeypatch torch.load to default weights_only to False if not specified."""
-        # This is strictly necessary for PyTorch 2.6+ compatibility with Coqui TTS
-        original_load = torch.load
-        def patched_load(*args, **kwargs):
-            if 'weights_only' not in kwargs:
-                kwargs['weights_only'] = False
-            return original_load(*args, **kwargs)
-        torch.load = patched_load
 
     def __do_speaker_selection(self, tts):
         """Determine the speaker reference or ID to use for synthesis."""

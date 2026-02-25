@@ -15,3 +15,18 @@ def __get_app_data_dir():
 APP_DATA_DIR = __get_app_data_dir()
 SETTINGS_PATH = os.path.join(APP_DATA_DIR, SETTINGS_FILE_NAME)
 MODEL_CACHE_PATH = os.path.join(APP_DATA_DIR, MODEL_META_DATA_CACHE_FILE_NAME)
+
+def import_and_monkey_patch_torch():
+    """Import torch and monkeypatch torch.load to default weights_only to False if not specified.
+    This is necessary for PyTorch 2.6+ compatibility with Coqui TTS.
+    """
+    try:
+        import torch
+        original_load = torch.load
+        def patched_load(*args, **kwargs):
+            if 'weights_only' not in kwargs:
+                kwargs['weights_only'] = False
+            return original_load(*args, **kwargs)
+        torch.load = patched_load
+    except ImportError:
+        pass

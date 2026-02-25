@@ -71,7 +71,7 @@ class MainWindow(QWidget):
 
         # Explicit validation for missing multi-speaker selection
         if info["status"] == "unknown":
-             QMessageBox.critical(self, "Metadata Required", "Please click 'Load language and speakers' to probe this model's capabilities before generating.")
+             QMessageBox.critical(self, "Metadata Required", "Please click 'Download Model' to probe this model's capabilities before generating.")
              return
         elif info["speaker_type"] == "multi" and not speaker_id and not speaker_wav:
              QMessageBox.critical(self, "Speaker Required", "Please select a speaker from the dropdown or provide a reference WAV.")
@@ -155,8 +155,8 @@ class MainWindow(QWidget):
         status = meta_data["status"]
         
         if status == "unknown":
-            self.lbl_speaker_info.setText("Unknown (Probing recommended)")
-            self.lbl_lang_info.setText("Unknown (Probing recommended)")
+            self.lbl_speaker_info.setText("No Information (Download required)")
+            self.lbl_lang_info.setText("No Information (Download required)")
             self.speaker_stack.setCurrentIndex(0) # Show Label
             self.lang_stack.setCurrentIndex(0)    # Show Label
             show_load_btn = True
@@ -179,7 +179,7 @@ class MainWindow(QWidget):
             else:
                 self.lbl_speaker_info.setText("Single speaker model")
                 self.speaker_stack.setCurrentIndex(0) # Show Label
-
+            
             # Handle Multilingual UI
             if meta_data["is_multilingual"]:
                 self.lang_stack.setCurrentIndex(1) # Show Combo
@@ -206,28 +206,27 @@ class MainWindow(QWidget):
             
         self.btn_load_metadata.setVisible(show_load_btn)
         self.btn_load_metadata.setEnabled(show_load_btn)
-        if show_load_btn:
-            self.btn_load_metadata.setText("Load language and speakers\nif available")
 
     def __on_load_metadata_clicked(self):
         model_name = self.combo_model.currentData()
         if not model_name:
             return
             
-        self.__log(f"<b>[STATUS]</b> Probing metadata for {model_name}...", color="#facc15")
-        self.btn_load_metadata.setText("Probing...\n(Windows may flash)")
+        self.__log(f"<b>[STATUS]</b> Downloading and probing {model_name}...", color="#facc15")
+        self.btn_load_metadata.setText("Downloading & Probing...")
         self.btn_load_metadata.setEnabled(False)
         
         # Combined Fetcher
         self.fetcher = MetadataFetcher(model_name)
         self.fetcher.finished.connect(self.__on_metadata_fetched)
         self.fetcher.error.connect(self.__on_metadata_error)
+        self.fetcher.log_signal.connect(lambda msg, rep: self.__log(msg, color=("#9ca3af" if "</b>" not in msg else "#00ff00"), replace=rep, is_lib=("</b>" not in msg)))
         self.fetcher.start()
 
     def __on_metadata_fetched(self, model_name, speaker_type, is_multilingual, speakers, languages):
         model_meta_data_cache.update_model_metadata(model_name, speaker_type, is_multilingual, speakers, languages)
         
-        self.__log(f"<b>[STATUS]</b> Metadata fetched for {model_name}:", color="#4ade80")
+        self.__log(f"<b>[STATUS]</b> Download and analysis complete for {model_name}:", color="#4ade80")
         self.__log(f" &nbsp;&bull; Speaker Type: {speaker_type}", color="#4ade80")
         self.__log(f" &nbsp;&bull; Multilingual: {is_multilingual}", color="#4ade80")
         self.__log(f" &nbsp;&bull; Speakers: {len(speakers)} found", color="#4ade80")
@@ -365,7 +364,7 @@ class MainWindow(QWidget):
         grid_layout.addWidget(self.speaker_stack, row, 1)
 
     def __add_metadata_loader_button(self, grid_layout, row):
-        self.btn_load_metadata = QPushButton("Load language and speakers\nif available")
+        self.btn_load_metadata = QPushButton("Download Model")
         self.btn_load_metadata.setStyleSheet("padding: 5px; min-height: 2.5em;")
         self.btn_load_metadata.clicked.connect(self.__on_load_metadata_clicked)
         

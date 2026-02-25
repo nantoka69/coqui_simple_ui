@@ -1,9 +1,13 @@
+import sys
 from PyQt6.QtCore import QThread, pyqtSignal
+from background.stream_redirector import StreamRedirector
+from . import import_and_monkey_patch_torch
 
 class MetadataFetcher(QThread):
     # model_name, speaker_type (single/multi), is_multilingual, speakers, languages
     finished = pyqtSignal(str, str, bool, list, list)
     error = pyqtSignal(str)
+    log_signal = pyqtSignal(str, bool)
 
     def __init__(self, model_name):
         super().__init__()
@@ -12,6 +16,14 @@ class MetadataFetcher(QThread):
     def run(self):
         try:
             from TTS.api import TTS
+            import_and_monkey_patch_torch()
+
+            # Redirect stdout/stderr to capture downloader/init logs
+            sys.stdout = StreamRedirector(self.log_signal)
+            sys.stderr = sys.stdout
+
+            self.log_signal.emit(f"<b>[STATUS]</b> Initializing engine and downloading model if needed...", False)
+
             # Initialize TTS once to query all metadata
             # cpu=True/gpu=False for speed since we are only peeking at metadata
             tts = TTS(model_name=self.model_name, progress_bar=False, gpu=False)
@@ -25,6 +37,9 @@ class MetadataFetcher(QThread):
             self.finished.emit(self.model_name, speaker_type, is_multilingual, speakers, languages)
         except Exception as e:
             self.error.emit(str(e))
+        finally:
+            sys.stdout = None
+            sys.stderr = None
 
     def __extract_languages(self, tts):
         languages = getattr(tts, "languages", [])

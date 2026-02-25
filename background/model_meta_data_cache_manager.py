@@ -9,8 +9,13 @@ class ModelMetaDataCacheManager:
 
     def get_model_info(self, model_name):
         info = self.cache["models"].get(model_name, {})
+        status = info.get("status", "unknown")
+        # Backwards compatibility: "known" is now "downloaded"
+        if status == "known":
+            status = "downloaded"
+            
         return {
-            "status": info.get("status", "unknown"),
+            "status": status,
             "speaker_type": info.get("speaker_type", "single"),
             "is_multilingual": info.get("is_multilingual", False),
             "speakers": info.get("speakers", []),
@@ -19,7 +24,7 @@ class ModelMetaDataCacheManager:
 
     def update_model_metadata(self, model_name, speaker_type, is_multilingual, speakers, languages):
         self.cache["models"][model_name] = {
-            "status": "known",
+            "status": "downloaded",
             "speaker_type": speaker_type,
             "is_multilingual": is_multilingual,
             "speakers": speakers,
