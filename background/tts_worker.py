@@ -9,13 +9,13 @@ class TTSWorker(QThread):
     error = pyqtSignal(str)
     log_signal = pyqtSignal(str, bool) # Added bool for 'replace last line'
 
-    def __init__(self, text, model_name, vocoder_name, speaker_wav, output_path):
+    def __init__(self, text, model_name, vocoder_name, speaker_wav, speaker_id, output_path):
         super().__init__()
         self.text = text
         self.model_name = model_name
         self.vocoder_name = vocoder_name
         self.speaker_wav = speaker_wav
-        self.speaker_id = None # Set externally
+        self.speaker_id = speaker_id
         self.output_path = output_path
 
     def run(self):

@@ -89,9 +89,7 @@ class MainWindow(QWidget):
         self.__log("<b>[STATUS]</b> Initializing TTS Engine...", color="#facc15")
         self.__log("<i>Note: External WAV takes precedence over internal ID.</i>", color="#9ca3af")
 
-        self.worker = TTSWorker(text, model, vocoder, speaker_wav, output)
-        # Update worker to handle the internal speaker ID (need to modify TTSWorker)
-        self.worker.speaker_id = speaker_id 
+        self.worker = TTSWorker(text, model, vocoder, speaker_wav, speaker_id, output)
         self.worker.finished.connect(self.__on_tts_finished)
         self.worker.error.connect(self.__on_tts_error)
         self.worker.log_signal.connect(lambda msg, rep: self.__log(msg, color=("#9ca3af" if "</b>" not in msg else "#00ff00"), replace=rep, is_lib=("</b>" not in msg)))
