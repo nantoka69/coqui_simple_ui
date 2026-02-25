@@ -12,7 +12,7 @@ class MainWindow(QWidget):
         super().__init__()
         self.tts_model_names = tts_model_names
         self.vocoder_model_names = vocoder_model_names
-        self.clean_tts_model_names = [m.replace(" [Loaded]", "") for m in tts_model_names]
+        self.clean_tts_model_names = [m.replace(" [Downloaded]", "") for m in tts_model_names]
         
         # Sync current model list with cache
         model_meta_data_cache.sync_models(self.clean_tts_model_names)
@@ -232,6 +232,11 @@ class MainWindow(QWidget):
         self.__log(f" &nbsp;&bull; Speakers: {len(speakers)} found", color="#4ade80")
         self.__log(f" &nbsp;&bull; Languages: {len(languages)} found", color="#4ade80")
         
+        # Update the item text in the combo box to show it's downloaded
+        idx = self.combo_model.findData(model_name)
+        if idx != -1:
+            self.combo_model.setItemText(idx, f"{model_name} [Downloaded]")
+
         # If the currently selected model is still this one, update UI
         if self.combo_model.currentData() == model_name:
             self.__on_model_changed()

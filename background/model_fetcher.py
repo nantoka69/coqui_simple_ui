@@ -17,7 +17,7 @@ class ModelFetcher(QThread):
             processed_tts_model_names = []
             for model_name in tts_model_names:
                 if self.__is_loaded(manager, model_name):
-                    processed_tts_model_names.append(f"{model_name} [Loaded]")
+                    processed_tts_model_names.append(f"{model_name} [Downloaded]")
                 else:
                     processed_tts_model_names.append(model_name)
 
