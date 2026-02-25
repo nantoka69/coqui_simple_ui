@@ -33,13 +33,7 @@ class MetadataFetcher(QThread):
             languages = self.__extract_languages(tts)
             speakers = self.__extract_speakers(tts)
 
-            # Heuristic: XTTS models are ALWAYS multi-speaker (support cloning)
-            # and might have internal speakers even if is_multi_speaker is False
-            is_xtts = "xtts" in self.model_name.lower()
-            if is_xtts or tts.is_multi_speaker:
-                speaker_type = "multi"
-            else:
-                speaker_type = "single"
+            speaker_type = "multi" if tts.is_multi_speaker else "single"
                 
             self.finished.emit(self.model_name, speaker_type, is_multilingual, speakers, languages)
         except Exception as e:
@@ -58,9 +52,7 @@ class MetadataFetcher(QThread):
 
     def __extract_speakers(self, tts):
         speakers = []
-        # Check standard locations regardless of is_multi_speaker property
-        # as some models (like XTTS) might have them in synthesizer/model but not reported globally
-        if True:
+        if tts.is_multi_speaker:
             # Standard TTS models
             if hasattr(tts, "speakers") and tts.speakers:
                 speakers = tts.speakers
