@@ -8,21 +8,36 @@ class ModelMetaDataCacheManager:
         self.cache = self.__load_cache()
 
     def get_model_info(self, model_name):
-        return self.cache["models"].get(model_name, {"status": "unknown", "speakers": []})
+        info = self.cache["models"].get(model_name, {})
+        return {
+            "status": info.get("status", "unknown"),
+            "speaker_type": info.get("speaker_type", "single"),
+            "is_multilingual": info.get("is_multilingual", False),
+            "speakers": info.get("speakers", []),
+            "languages": info.get("languages", [])
+        }
 
-    def update_model(self, model_name, status, speakers=None):
-        if model_name not in self.cache["models"]:
-            self.cache["models"][model_name] = {}
-        self.cache["models"][model_name]["status"] = status
-        if speakers is not None:
-            self.cache["models"][model_name]["speakers"] = speakers
+    def update_model_metadata(self, model_name, speaker_type, is_multilingual, speakers, languages):
+        self.cache["models"][model_name] = {
+            "status": "known",
+            "speaker_type": speaker_type,
+            "is_multilingual": is_multilingual,
+            "speakers": speakers,
+            "languages": languages
+        }
         self.__save_cache()
 
     def sync_models(self, tts_model_names):
         changed = False
         for m in tts_model_names:
             if m not in self.cache["models"]:
-                self.cache["models"][m] = {"status": "unknown", "speakers": []}
+                self.cache["models"][m] = {
+                    "status": "unknown", 
+                    "speaker_type": "single",
+                    "is_multilingual": False,
+                    "speakers": [],
+                    "languages": []
+                }
                 changed = True
         if changed:
             self.__save_cache()

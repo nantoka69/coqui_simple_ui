@@ -1,6 +1,6 @@
 import sys
 from PyQt6.QtWidgets import QApplication, QMessageBox, QSplashScreen
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QObject, pyqtSlot
 from PyQt6.QtGui import QPixmap, QColor, QLinearGradient, QPainter, QFont
 
 from background.model_fetcher import ModelFetcher
@@ -33,21 +33,30 @@ if __name__ == "__main__":
     app.processEvents()
 
     main_window = None
+    
+    class StartupBridge(QObject):
+        @pyqtSlot(list, list)
+        def on_models_fetched(self, tts_model_names, vocoder_model_names):
+            try:
+                global main_window
+                main_window = MainWindow(tts_model_names, vocoder_model_names)
+                main_window.show()
+                splash.finish(main_window)
+            except Exception as e:
+                splash.close()
+                QMessageBox.critical(None, "Runtime Error", f"An error occurred during UI initialization:\n{e}")
+                sys.exit(1)
 
-    def on_models_fetched(tts_model_names, vocoder_model_names):
-        global main_window
-        main_window = MainWindow(tts_model_names, vocoder_model_names)
-        main_window.show()
-        splash.finish(main_window)
+        @pyqtSlot(str)
+        def on_fetch_error(self, err):
+            splash.close()
+            QMessageBox.critical(None, "Startup Error", f"Failed to fetch models:\n{err}\n\nFalling back to manual entries.")
+            self.on_models_fetched([], [])
 
-    def on_fetch_error(err):
-        splash.close()
-        QMessageBox.critical(None, "Startup Error", f"Failed to fetch models:\n{err}\n\nFalling back to manual entries.")
-        on_models_fetched([], [])
-
-    app.fetcher = ModelFetcher() # Store reference on app object to prevent GC
-    app.fetcher.finished.connect(on_models_fetched)
-    app.fetcher.error.connect(on_fetch_error)
+    bridge = StartupBridge()
+    app.fetcher = ModelFetcher()
+    app.fetcher.finished.connect(bridge.on_models_fetched)
+    app.fetcher.error.connect(bridge.on_fetch_error)
     app.fetcher.start()
 
     sys.exit(app.exec())

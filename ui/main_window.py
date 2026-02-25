@@ -2,10 +2,9 @@ import os
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, 
                              QTextEdit, QPushButton, QLabel, QMessageBox, 
                              QComboBox, QFileDialog, QLineEdit, QFormLayout,
-                             QStackedWidget)
-from background.model_meta_data_cache_manager import ModelMetaDataCacheManager
+                             QStackedWidget, QGridLayout)
 from . import settings, model_meta_data_cache
-from background.speaker_fetcher import SpeakerFetcher
+from background.metadata_fetcher import MetadataFetcher
 from background.tts_worker import TTSWorker
 
 class MainWindow(QWidget):
@@ -28,17 +27,19 @@ class MainWindow(QWidget):
 
         self.__add_text_input_field(layout)
 
-        # Settings Form
-        form_layout = QFormLayout()
+        # Settings Grid
+        grid_layout = QGridLayout()
+        grid_layout.setColumnStretch(1, 1) # Make the middle column (fields) stretch
 
-        self.__add_model_selection_combo_box(form_layout)
+        self.__add_model_selection_combo_box(grid_layout, 0)
+        self.__add_vocoder_selection_combo_box(grid_layout, 1)
+        self.__add_metadata_loader_button(grid_layout, 2) # Row 2 & 3, Col 2
+        self.__add_language_selection_area(grid_layout, 2)
+        self.__add_internal_speaker_selection_area(grid_layout, 3)
+        self.__add_external_speaker_reference_field(grid_layout, 4)
+        self.__add_output_file_section(grid_layout, 5)
 
-        self.__add_vocoder_selection_combo_box(form_layout)
-        self.__add_internal_speaker_selection_area(form_layout)
-        self.__add_external_speaker_reference_field(form_layout)
-        self.__add_output_file_section(form_layout)
-
-        layout.addLayout(form_layout)
+        layout.addLayout(grid_layout)
 
         self.__add_generate_button(layout)
         self.__add_console_output_window(layout)
@@ -59,20 +60,20 @@ class MainWindow(QWidget):
         vocoder = self.combo_vocoder.currentText().strip()
         speaker_wav = self.edit_speaker.text().strip()
         speaker_id = self.combo_internal_speaker.currentData() if self.speaker_stack.currentIndex() == 1 else None
-        output = self.edit_output.text().strip()
-
+        language = self.combo_language.currentData() if self.lang_stack.currentIndex() == 1 else "en"
         if not model:
             QMessageBox.warning(self, "Warning", "Please select a model.")
             return
 
-        # Explicit validation for missing multi-speaker selection
         info = model_meta_data_cache.get_model_info(model)
+        is_multilingual = info["is_multilingual"]
+        output = self.edit_output.text().strip()
+
+        # Explicit validation for missing multi-speaker selection
         if info["status"] == "unknown":
-             # We don't know yet, but if it's XTTS we suspect multi
-             if "xtts" in model or "multilingual" in model:
-                  QMessageBox.critical(self, "Speaker Required", "Download speaker list and select a speaker index.")
-                  return
-        elif info["status"] == "multi" and not speaker_id and not speaker_wav:
+             QMessageBox.critical(self, "Metadata Required", "Please click 'Load language and speakers' to probe this model's capabilities before generating.")
+             return
+        elif info["speaker_type"] == "multi" and not speaker_id and not speaker_wav:
              QMessageBox.critical(self, "Speaker Required", "Please select a speaker from the dropdown or provide a reference WAV.")
              return
 
@@ -89,7 +90,7 @@ class MainWindow(QWidget):
         self.__log("<b>[STATUS]</b> Initializing TTS Engine...", color="#facc15")
         self.__log("<i>Note: External WAV takes precedence over internal ID.</i>", color="#9ca3af")
 
-        self.worker = TTSWorker(text, model, vocoder, speaker_wav, speaker_id, output)
+        self.worker = TTSWorker(text, model, vocoder, speaker_wav, speaker_id, language, is_multilingual, output)
         self.worker.finished.connect(self.__on_tts_finished)
         self.worker.error.connect(self.__on_tts_error)
         self.worker.log_signal.connect(lambda msg, rep: self.__log(msg, color=("#9ca3af" if "</b>" not in msg else "#00ff00"), replace=rep, is_lib=("</b>" not in msg)))
@@ -146,30 +147,106 @@ class MainWindow(QWidget):
         # Save selection
         settings.set_setting("last_model", model_name)
             
+        # Trigger fetchers if unknown
+        # We now manage status labels and button visibility
+        show_load_btn = False
+        
         meta_data = model_meta_data_cache.get_model_info(model_name)
         status = meta_data["status"]
         
         if status == "unknown":
-            self.speaker_stack.setCurrentIndex(0) # Show Load Button
-            self.btn_load_speakers.setText("Load speaker IDs if available")
-            self.btn_load_speakers.setEnabled(True)
-        elif status == "single":
-            self.speaker_stack.setCurrentIndex(2) # Show Label
-        elif status == "multi":
-            self.speaker_stack.setCurrentIndex(1) # Show Combo
-            self.combo_internal_speaker.blockSignals(True)
-            self.combo_internal_speaker.clear()
-            for i, spk in enumerate(meta_data["speakers"]):
-                self.combo_internal_speaker.addItem(f"[{i}] {spk}", spk)
+            self.lbl_speaker_info.setText("Unknown (Probing recommended)")
+            self.lbl_lang_info.setText("Unknown (Probing recommended)")
+            self.speaker_stack.setCurrentIndex(0) # Show Label
+            self.lang_stack.setCurrentIndex(0)    # Show Label
+            show_load_btn = True
+        else:
+            # Handle Speaker UI
+            if meta_data["speaker_type"] == "multi":
+                self.speaker_stack.setCurrentIndex(1) # Show Combo
+                self.combo_internal_speaker.blockSignals(True)
+                self.combo_internal_speaker.clear()
+                for i, spk in enumerate(meta_data["speakers"]):
+                    self.combo_internal_speaker.addItem(f"[{i}] {spk}", spk)
+                
+                # Restore speaker
+                last_speaker = settings.get_setting(f"last_speaker_{model_name}")
+                if last_speaker:
+                    idx = self.combo_internal_speaker.findData(last_speaker)
+                    if idx != -1:
+                        self.combo_internal_speaker.setCurrentIndex(idx)
+                self.combo_internal_speaker.blockSignals(False)
+            else:
+                self.lbl_speaker_info.setText("Single speaker model")
+                self.speaker_stack.setCurrentIndex(0) # Show Label
+
+            # Handle Multilingual UI
+            if meta_data["is_multilingual"]:
+                self.lang_stack.setCurrentIndex(1) # Show Combo
+                self.combo_language.blockSignals(True)
+                self.combo_language.clear()
+                for lang in meta_data["languages"]:
+                    self.combo_language.addItem(lang, lang)
+                
+                # Restore language
+                last_lang = settings.get_setting(f"last_language_{model_name}")
+                if last_lang:
+                    idx = self.combo_language.findData(last_lang)
+                    if idx != -1:
+                        self.combo_language.setCurrentIndex(idx)
+                else:
+                    # Default to English if available
+                    idx = self.combo_language.findData("en")
+                    if idx != -1:
+                        self.combo_language.setCurrentIndex(idx)
+                self.combo_language.blockSignals(False)
+            else:
+                self.lbl_lang_info.setText("Single language model")
+                self.lang_stack.setCurrentIndex(0) # Show Label
             
-            # Restore speaker
-            last_speaker = settings.get_setting(f"last_speaker_{model_name}")
-            if last_speaker:
-                idx = self.combo_internal_speaker.findData(last_speaker)
-                if idx != -1:
-                    self.combo_internal_speaker.setCurrentIndex(idx)
+        self.btn_load_metadata.setVisible(show_load_btn)
+        self.btn_load_metadata.setEnabled(show_load_btn)
+        if show_load_btn:
+            self.btn_load_metadata.setText("Load language and speakers\nif available")
+
+    def __on_load_metadata_clicked(self):
+        model_name = self.combo_model.currentData()
+        if not model_name:
+            return
             
-            self.combo_internal_speaker.blockSignals(False)
+        self.__log(f"<b>[STATUS]</b> Probing metadata for {model_name}...", color="#facc15")
+        self.btn_load_metadata.setText("Probing...\n(Windows may flash)")
+        self.btn_load_metadata.setEnabled(False)
+        
+        # Combined Fetcher
+        self.fetcher = MetadataFetcher(model_name)
+        self.fetcher.finished.connect(self.__on_metadata_fetched)
+        self.fetcher.error.connect(self.__on_metadata_error)
+        self.fetcher.start()
+
+    def __on_metadata_fetched(self, model_name, speaker_type, is_multilingual, speakers, languages):
+        model_meta_data_cache.update_model_metadata(model_name, speaker_type, is_multilingual, speakers, languages)
+        
+        self.__log(f"<b>[STATUS]</b> Metadata fetched for {model_name}:", color="#4ade80")
+        self.__log(f" &nbsp;&bull; Speaker Type: {speaker_type}", color="#4ade80")
+        self.__log(f" &nbsp;&bull; Multilingual: {is_multilingual}", color="#4ade80")
+        self.__log(f" &nbsp;&bull; Speakers: {len(speakers)} found", color="#4ade80")
+        self.__log(f" &nbsp;&bull; Languages: {len(languages)} found", color="#4ade80")
+        
+        # If the currently selected model is still this one, update UI
+        if self.combo_model.currentData() == model_name:
+            self.__on_model_changed()
+
+    def __on_metadata_error(self, err):
+        self.__log(f"<b>[ERROR]</b> Metadata probe failed: {err}", color="#f87171")
+        QMessageBox.warning(self, "Load Error", f"Could not load model metadata:\n{err}")
+        self.__on_model_changed()
+
+    def __on_language_changed(self):
+        model_name = self.combo_model.currentData()
+        lang = self.combo_language.currentData()
+        if model_name and lang:
+            settings.set_setting(f"last_language_{model_name}", lang)
 
     def __on_vocoder_changed(self):
         vocoder_name = self.combo_vocoder.currentText().strip()
@@ -180,29 +257,6 @@ class MainWindow(QWidget):
         speaker_id = self.combo_internal_speaker.currentData()
         if model_name and speaker_id:
             settings.set_setting(f"last_speaker_{model_name}", speaker_id)
-
-    def __on_load_speakers_clicked(self):
-        model_name = self.combo_model.currentData()
-        if not model_name:
-            return
-            
-        self.btn_load_speakers.setText("Loading... (Windows may flash)")
-        self.btn_load_speakers.setEnabled(False)
-        
-        self.fetcher = SpeakerFetcher(model_name)
-        self.fetcher.finished.connect(self.__on_speakers_fetched)
-        self.fetcher.error.connect(self.__on_speaker_error)
-        self.fetcher.start()
-
-    def __on_speakers_fetched(self, model_name, status, speakers):
-        model_meta_data_cache.update_model(model_name, status, speakers)
-        # If the currently selected model is still this one, update UI
-        if self.combo_model.currentData() == model_name:
-            self.__on_model_changed()
-
-    def __on_speaker_error(self, err):
-        QMessageBox.warning(self, "Load Error", f"Could not load speaker list:\n{err}")
-        self.__on_model_changed()
 
     def __browse_speaker(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Select Speaker Reference", "", "Audio Files (*.wav)")
@@ -242,7 +296,7 @@ class MainWindow(QWidget):
         self.text_edit.setPlaceholderText("Type something here...")
         layout.addWidget(self.text_edit)
 
-    def __add_model_selection_combo_box(self, form_layout):
+    def __add_model_selection_combo_box(self, grid_layout, row):
         self.combo_model = QComboBox()
         self.combo_model.setEditable(False)
         for display_name, real_name in zip(self.tts_model_names, self.clean_tts_model_names):
@@ -256,9 +310,11 @@ class MainWindow(QWidget):
             
         self.combo_model.setCurrentIndex(default_idx)
         self.combo_model.currentIndexChanged.connect(self.__on_model_changed)
-        form_layout.addRow("Model:", self.combo_model)
+        
+        grid_layout.addWidget(QLabel("Model:"), row, 0)
+        grid_layout.addWidget(self.combo_model, row, 1, 1, 2) # Span 2 columns if no button
 
-    def __add_vocoder_selection_combo_box(self, form_layout):
+    def __add_vocoder_selection_combo_box(self, grid_layout, row):
         self.combo_vocoder = QComboBox()
         self.combo_vocoder.setEditable(False)
         self.combo_vocoder.addItem("") # Optional
@@ -273,29 +329,50 @@ class MainWindow(QWidget):
         self.combo_vocoder.setCurrentIndex(vocoder_idx)
         self.combo_vocoder.currentIndexChanged.connect(self.__on_vocoder_changed)
         
-        form_layout.addRow("Vocoder (Optional):", self.combo_vocoder)
+        grid_layout.addWidget(QLabel("Vocoder (Optional):"), row, 0)
+        grid_layout.addWidget(self.combo_vocoder, row, 1, 1, 2)
 
-    def __add_internal_speaker_selection_area(self, form_layout):
+    def __add_language_selection_area(self, grid_layout, row):
+        self.lang_stack = QStackedWidget()
+        
+        # Page 0: Status Label
+        self.lbl_lang_info = QLabel("Single language model")
+        self.lbl_lang_info.setStyleSheet("color: #9ca3af; font-style: italic;")
+        self.lang_stack.addWidget(self.lbl_lang_info)
+        
+        # Page 1: Language Combo
+        self.combo_language = QComboBox()
+        self.combo_language.currentIndexChanged.connect(self.__on_language_changed)
+        self.lang_stack.addWidget(self.combo_language)
+        
+        grid_layout.addWidget(QLabel("Language:"), row, 0)
+        grid_layout.addWidget(self.lang_stack, row, 1)
+
+    def __add_internal_speaker_selection_area(self, grid_layout, row):
         self.speaker_stack = QStackedWidget()
         
-        # Page 0: Load Button
-        self.btn_load_speakers = QPushButton("Load speaker IDs if available")
-        self.btn_load_speakers.clicked.connect(self.__on_load_speakers_clicked)
-        self.speaker_stack.addWidget(self.btn_load_speakers)
+        # Page 0: Status Label
+        self.lbl_speaker_info = QLabel("Single speaker model")
+        self.lbl_speaker_info.setStyleSheet("color: #9ca3af; font-style: italic;")
+        self.speaker_stack.addWidget(self.lbl_speaker_info)
         
         # Page 1: Speaker Combo
         self.combo_internal_speaker = QComboBox()
         self.combo_internal_speaker.currentIndexChanged.connect(self.__on_speaker_changed)
         self.speaker_stack.addWidget(self.combo_internal_speaker)
         
-        # Page 2: Single Speaker Label
-        self.lbl_single_speaker = QLabel("Single speaker model")
-        self.lbl_single_speaker.setStyleSheet("color: #9ca3af; font-style: italic;")
-        self.speaker_stack.addWidget(self.lbl_single_speaker)
-        
-        form_layout.addRow("Speaker (Internal):", self.speaker_stack)
+        grid_layout.addWidget(QLabel("Speaker (Internal):"), row, 0)
+        grid_layout.addWidget(self.speaker_stack, row, 1)
 
-    def __add_external_speaker_reference_field(self, form_layout):
+    def __add_metadata_loader_button(self, grid_layout, row):
+        self.btn_load_metadata = QPushButton("Load language and speakers\nif available")
+        self.btn_load_metadata.setStyleSheet("padding: 5px; min-height: 2.5em;")
+        self.btn_load_metadata.clicked.connect(self.__on_load_metadata_clicked)
+        
+        # Add to the right column, spanning 2 rows (Language and Speaker)
+        grid_layout.addWidget(self.btn_load_metadata, row, 2, 2, 1)
+
+    def __add_external_speaker_reference_field(self, grid_layout, row):
         speaker_layout = QHBoxLayout()
         
         saved_speaker = settings.get_setting("last_external_speaker_path", "")
@@ -307,12 +384,14 @@ class MainWindow(QWidget):
         self.btn_browse_speaker.clicked.connect(self.__browse_speaker)
         speaker_layout.addWidget(self.edit_speaker)
         speaker_layout.addWidget(self.btn_browse_speaker)
-        form_layout.addRow("Speaker Reference (External WAV):", speaker_layout)
+        
+        grid_layout.addWidget(QLabel("Speaker Reference (External WAV):"), row, 0)
+        grid_layout.addLayout(speaker_layout, row, 1, 1, 2)
 
     def __on_external_speaker_changed(self):
         settings.set_setting("last_external_speaker_path", self.edit_speaker.text().strip())
 
-    def __add_output_file_section(self, form_layout):
+    def __add_output_file_section(self, grid_layout, row):
         output_layout = QHBoxLayout()
         
         saved_output = settings.get_setting("last_output_path", os.path.join(os.getcwd(), "output.wav"))
@@ -328,7 +407,9 @@ class MainWindow(QWidget):
         output_layout.addWidget(self.edit_output)
         output_layout.addWidget(self.btn_browse_output)
         output_layout.addWidget(self.btn_play)
-        form_layout.addRow("Output File:", output_layout)
+        
+        grid_layout.addWidget(QLabel("Output File:"), row, 0)
+        grid_layout.addLayout(output_layout, row, 1, 1, 2)
 
     def __on_output_path_changed(self):
         settings.set_setting("last_output_path", self.edit_output.text().strip())
