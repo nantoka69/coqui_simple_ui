@@ -1,3 +1,5 @@
+import os
+os.environ["TQDM_ASCII"] = "-123456789#"
 import sys
 from PyQt6.QtWidgets import QApplication, QMessageBox, QSplashScreen
 from PyQt6.QtCore import Qt, QObject, pyqtSlot

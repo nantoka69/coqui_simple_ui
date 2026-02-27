@@ -19,6 +19,8 @@ class MetadataFetcher(QThread):
             import_and_monkey_patch_torch()
 
             # Redirect stdout/stderr to capture downloader/init logs
+            old_stdout = sys.stdout
+            old_stderr = sys.stderr
             sys.stdout = StreamRedirector(self.log_signal)
             sys.stderr = sys.stdout
 
@@ -26,7 +28,7 @@ class MetadataFetcher(QThread):
 
             # Initialize TTS once to query all metadata
             # cpu=True/gpu=False for speed since we are only peeking at metadata
-            tts = TTS(model_name=self.model_name, progress_bar=False, gpu=False)
+            tts = TTS(model_name=self.model_name, progress_bar=True, gpu=False)
             
             # Extract speakers and languages
             is_multilingual = getattr(tts, "is_multi_lingual", False)
@@ -39,8 +41,8 @@ class MetadataFetcher(QThread):
         except Exception as e:
             self.error.emit(str(e))
         finally:
-            sys.stdout = None
-            sys.stderr = None
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
 
     def __extract_languages(self, tts):
         languages = getattr(tts, "languages", [])

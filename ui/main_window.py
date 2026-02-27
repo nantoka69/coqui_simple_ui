@@ -1,4 +1,5 @@
 import os
+import re
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, 
                              QTextEdit, QPushButton, QLabel, QMessageBox, 
                              QComboBox, QFileDialog, QLineEdit, QFormLayout,
@@ -51,12 +52,12 @@ class MainWindow(QWidget):
 
         # Trigger initial speaker UI state
         self.__on_model_changed()
-        self.console.log("Ready")
+        self.console.log("Ready", is_rich_text=True)
 
     def __handle_log_signal(self, msg, replace):
         """Parse incoming logs from background workers and route to console correctly."""
         if msg.startswith("[STATUS] "):
-            self.console.log(msg[9:], replace=replace, log_type=LogType.STATUS)
+            self.console.log(msg[9:], replace=replace, log_type=LogType.STATUS, is_rich_text=True)
         elif msg.startswith("[PROG] "):
             self.console.log(msg[7:], replace=replace, log_type=LogType.PROG)
         elif msg.startswith("[INPUT] "):
@@ -66,10 +67,16 @@ class MainWindow(QWidget):
         elif msg.startswith("[ERROR] "):
             self.console.log(msg[8:], replace=replace, log_type=LogType.ERROR)
         elif msg.startswith("[WARNING] "):
-            self.console.log(msg, replace=replace) # Keep prefix for warnings for now, using default green
+            self.console.log(msg, replace=replace) # Keep prefix for warnings
         else:
-            # Everything else (like raw library output) is treated as LIB
-            self.console.log(msg, replace=replace, log_type=LogType.LIB)
+            # Typical tqdm bars have '|' followed by a bar character (-123456789#) and contain '%'
+            is_probably_progress = ("%" in msg) and bool(re.search(r'\|[-1-9#]', msg)) 
+            
+            if is_probably_progress:
+                # FORCE replace=True for progress bars to handle libraries that send newlines
+                self.console.log(msg, replace=True, log_type=LogType.PROG)
+            else:
+                self.console.log(msg, replace=replace, log_type=LogType.LIB)
 
     def __on_generate_clicked(self):
         text = self.text_edit.toPlainText().strip()
@@ -108,7 +115,7 @@ class MainWindow(QWidget):
             log_speaker = f"ID: {speaker_id}"
 
         self.__log_input(model, vocoder, log_speaker, output, text)
-        self.console.log("Initializing TTS Engine...", log_type=LogType.STATUS)
+        self.console.log("Initializing TTS Engine...", log_type=LogType.STATUS, is_rich_text=True)
         self.console.log("Note: External WAV takes precedence over internal ID.", color="#9ca3af")
 
         self.worker = TTSWorker(text, model, vocoder, speaker_wav, speaker_id, language, is_multilingual, output)
@@ -120,7 +127,7 @@ class MainWindow(QWidget):
 
     def __log_input(self, model, vocoder, speaker, output, text):
         """Log the command configuration."""
-        self.console.log("--- Starting TTS Task ---", color="#60a5fa")
+        self.console.log("--- Starting TTS Task ---", log_type=LogType.INPUT)
         self.console.log(f"Model: {model}", log_type=LogType.INPUT)
         if vocoder:
             self.console.log(f"Vocoder: {vocoder}", log_type=LogType.INPUT)
@@ -217,11 +224,11 @@ class MainWindow(QWidget):
     def __on_metadata_fetched(self, model_name, speaker_type, is_multilingual, speakers, languages):
         model_meta_data_cache.update_model_metadata(model_name, speaker_type, is_multilingual, speakers, languages)
         
-        self.console.log(f"Download and analysis complete for {model_name}:", log_type=LogType.STATUS)
-        self.console.log(f" &nbsp;&bull; Speaker Type: {speaker_type}", color="#4ade80")
-        self.console.log(f" &nbsp;&bull; Multilingual: {is_multilingual}", color="#4ade80")
-        self.console.log(f" &nbsp;&bull; Speakers: {len(speakers)} found", color="#4ade80")
-        self.console.log(f" &nbsp;&bull; Languages: {len(languages)} found", color="#4ade80")
+        self.console.log(f"Download and analysis complete for {model_name}:", log_type=LogType.STATUS, is_rich_text=True)
+        self.console.log(f" &nbsp;&bull; Speaker Type: {speaker_type}", log_type=LogType.STATUS, is_rich_text=True)
+        self.console.log(f" &nbsp;&bull; Multilingual: {is_multilingual}", log_type=LogType.STATUS, is_rich_text=True)
+        self.console.log(f" &nbsp;&bull; Speakers: {len(speakers)} found", log_type=LogType.STATUS, is_rich_text=True)
+        self.console.log(f" &nbsp;&bull; Languages: {len(languages)} found", log_type=LogType.STATUS, is_rich_text=True)
         
         # Update the item text in the combo box to show it's downloaded
         idx = self.combo_model.findData(model_name)

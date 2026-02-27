@@ -28,6 +28,8 @@ class TTSWorker(QThread):
             import_and_monkey_patch_torch()
             
             # Redirect stdout/stderr for this thread
+            old_stdout = sys.stdout
+            old_stderr = sys.stderr
             sys.stdout = StreamRedirector(self.log_signal)
             sys.stderr = sys.stdout
             
@@ -65,8 +67,8 @@ class TTSWorker(QThread):
         except Exception as e:
             self.error.emit(str(e))
         finally:
-            sys.stdout = None
-            sys.stderr = None
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
 
     def __split_into_sentences(self, text):
         """Split text into sentences/segments using an aggressive regex."""

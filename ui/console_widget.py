@@ -39,46 +39,52 @@ class ConsoleWidget(QWidget):
             QTextEdit {
                 background-color: #000000;
                 color: #00ff00;
-                font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-                font-size: 10pt;
+                font-family: 'Consolas', 'Courier New', 'Lucida Console', monospace;
+                font-size: 13px;
                 border: 1px solid #333333;
                 border-radius: 4px;
+                padding: 5px;
+                white-space: pre-wrap;
             }
         """)
         layout.addWidget(self.console_output)
 
-    def log(self, message, color=None, replace=False, log_type=LogType.NONE):
+    def log(self, message, color=None, replace=False, log_type=LogType.NONE, is_rich_text=False):
         """Append a message to the console window. If replace=True, replaces the last block."""
         
         # Determine Color
         if color is None:
             color = LOG_TYPE_COLORS.get(log_type, LOG_TYPE_COLORS[LogType.NONE])
 
-        # 1. Handle Prefixes and Escaping
-        if log_type == LogType.LIB:
-            # Escape HTML special characters for library output
+        # 1. Handle Escaping
+        if not is_rich_text:
+            # Escape HTML special characters to prevent truncation or accidental rendering
             clean_msg = message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        else:
+            clean_msg = message
+
+        # 2. Handle Prefixes
+        if log_type == LogType.LIB:
             formatted_msg = f'<b>[LIB]</b> {clean_msg}'
         elif log_type != LogType.NONE:
             # Prepend bold prefix for internal types
             prefix = log_type.name
-            formatted_msg = f'<b>[{prefix}]</b> {message}'
+            formatted_msg = f'<b>[{prefix}]</b> {clean_msg}'
         else:
-            # No prefix, use raw message
-            formatted_msg = message
+            # No prefix
+            formatted_msg = clean_msg
 
         cursor = self.console_output.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         
         if replace:
-            # Shift selection to the start of the current last block (logical paragraph)
-            # This handles wrapped lines correctly, unlike StartOfLine
+            cursor.movePosition(QTextCursor.MoveOperation.End)
             cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock, QTextCursor.MoveMode.KeepAnchor)
-            
-            if cursor.hasSelection():
-                # OVERWRITE the selected block using insertHtml
-                cursor.insertHtml(f'<span style="color: {color};">{formatted_msg}</span>')
-                return
+            # Delete the current block (the last line)
+            cursor.removeSelectedText()
+            # Insert the new text without creating a new block
+            cursor.insertHtml(f'<span style="color: {color};">{formatted_msg}</span>')
+            return
 
         # Use append() for normal logs to ensure they start on a new line
         self.console_output.append(f'<span style="color: {color};">{formatted_msg}</span>')
