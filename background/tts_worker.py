@@ -36,7 +36,7 @@ class TTSWorker(QThread):
             sentences = self.__split_into_sentences(self.text)
             
             total = len(sentences)
-            self.log_signal.emit(f"<b>[STATUS]</b> Identified {total} segments for processing.", False)
+            self.log_signal.emit(f"[STATUS] Identified {total} segments for processing.", False)
             
             all_wavs = []
             
@@ -44,7 +44,7 @@ class TTSWorker(QThread):
 
             for i, sentence in enumerate(sentences):
                 # Emit with 'replace=True' to keep the console clean
-                self.log_signal.emit(f"<b>[PROG]</b> Processing segment {i+1}/{total}...", True)
+                self.log_signal.emit(f"[PROG] Processing segment {i+1}/{total}...", True)
                 
                 # tts.tts handles both speaker (ID) and speaker_wav (file)
                 # We dynamically pass the language for XTTS if it's multilingual
@@ -55,7 +55,7 @@ class TTSWorker(QThread):
                 
                 all_wavs.append(wav)
             
-            self.log_signal.emit(f"<b>[STATUS]</b> Synthesis complete. Concatenating {len(all_wavs)} waves...", False)
+            self.log_signal.emit(f"[STATUS] Synthesis complete. Concatenating {len(all_wavs)} waves...", False)
             combined_wav = np.concatenate(all_wavs)
             
             # Save using the synthesizer's method (handles sample rate correctly)
@@ -81,10 +81,10 @@ class TTSWorker(QThread):
         if tts.is_multi_speaker:
             if self.speaker_wav and os.path.exists(self.speaker_wav):
                 use_speaker_wav = self.speaker_wav
-                self.log_signal.emit(f"<b>[STATUS]</b> Using speaker reference: {os.path.basename(use_speaker_wav)}", False)
+                self.log_signal.emit(f"[STATUS] Using speaker reference: {os.path.basename(use_speaker_wav)}", False)
             elif self.speaker_id:
                 use_speaker_id = self.speaker_id
-                self.log_signal.emit(f"<b>[STATUS]</b> Using internal speaker: {use_speaker_id}", False)
+                self.log_signal.emit(f"[STATUS] Using internal speaker: {use_speaker_id}", False)
             else:
                 # Try to find a default speaker ID
                 if hasattr(tts, "speakers") and tts.speakers:
@@ -93,8 +93,8 @@ class TTSWorker(QThread):
                     use_speaker_id = "Claribel Dervla"
                 
                 if use_speaker_id:
-                    self.log_signal.emit(f"<b>[STATUS]</b> Using default speaker ID: {use_speaker_id}", False)
+                    self.log_signal.emit(f"[STATUS] Using default speaker ID: {use_speaker_id}", False)
                 else:
-                    self.log_signal.emit("<b>[WARNING]</b> Multi-speaker model detected but no speaker reference or ID found. It might fail.", False)
+                    self.log_signal.emit("[WARNING] Multi-speaker model detected but no speaker reference or ID found. It might fail.", False)
         
         return use_speaker_wav, use_speaker_id

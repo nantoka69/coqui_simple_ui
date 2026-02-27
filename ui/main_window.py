@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
                              QComboBox, QFileDialog, QLineEdit, QFormLayout,
                              QStackedWidget, QGridLayout)
 from . import settings, model_meta_data_cache
-from .console_widget import ConsoleWidget
+from .console_widget import ConsoleWidget, LogType
 from background.metadata_fetcher import MetadataFetcher
 from background.tts_worker import TTSWorker
 
@@ -53,6 +53,24 @@ class MainWindow(QWidget):
         self.__on_model_changed()
         self.console.log("Ready")
 
+    def __handle_log_signal(self, msg, replace):
+        """Parse incoming logs from background workers and route to console correctly."""
+        if msg.startswith("[STATUS] "):
+            self.console.log(msg[9:], replace=replace, log_type=LogType.STATUS)
+        elif msg.startswith("[PROG] "):
+            self.console.log(msg[7:], replace=replace, log_type=LogType.PROG)
+        elif msg.startswith("[INPUT] "):
+            self.console.log(msg[8:], replace=replace, log_type=LogType.INPUT)
+        elif msg.startswith("[OUTPUT] "):
+            self.console.log(msg[9:], replace=replace, log_type=LogType.OUTPUT)
+        elif msg.startswith("[ERROR] "):
+            self.console.log(msg[8:], replace=replace, log_type=LogType.ERROR)
+        elif msg.startswith("[WARNING] "):
+            self.console.log(msg, replace=replace) # Keep prefix for warnings for now, using default green
+        else:
+            # Everything else (like raw library output) is treated as LIB
+            self.console.log(msg, replace=replace, log_type=LogType.LIB)
+
     def __on_generate_clicked(self):
         text = self.text_edit.toPlainText().strip()
         if not text:
@@ -90,26 +108,26 @@ class MainWindow(QWidget):
             log_speaker = f"ID: {speaker_id}"
 
         self.__log_input(model, vocoder, log_speaker, output, text)
-        self.console.log("<b>[STATUS]</b> Initializing TTS Engine...", color="#facc15")
-        self.console.log("<i>Note: External WAV takes precedence over internal ID.</i>", color="#9ca3af")
+        self.console.log("Initializing TTS Engine...", log_type=LogType.STATUS)
+        self.console.log("Note: External WAV takes precedence over internal ID.", color="#9ca3af")
 
         self.worker = TTSWorker(text, model, vocoder, speaker_wav, speaker_id, language, is_multilingual, output)
         self.worker.finished.connect(self.__on_tts_finished)
         self.worker.error.connect(self.__on_tts_error)
-        self.worker.log_signal.connect(lambda msg, rep: self.console.log(msg, color=("#9ca3af" if "</b>" not in msg else "#00ff00"), replace=rep, is_lib=("</b>" not in msg)))
+        self.worker.log_signal.connect(self.__handle_log_signal)
         self.worker.start()
 
 
     def __log_input(self, model, vocoder, speaker, output, text):
         """Log the command configuration."""
-        self.console.log("\n--- Starting TTS Task ---", color="#60a5fa")
-        self.console.log(f"<b>[INPUT]</b> Model: {model}", color="#60a5fa")
+        self.console.log("--- Starting TTS Task ---", color="#60a5fa")
+        self.console.log(f"Model: {model}", log_type=LogType.INPUT)
         if vocoder:
-            self.console.log(f"<b>[INPUT]</b> Vocoder: {vocoder}", color="#60a5fa")
+            self.console.log(f"Vocoder: {vocoder}", log_type=LogType.INPUT)
         if speaker:
-            self.console.log(f"<b>[INPUT]</b> Speaker Ref: {speaker}", color="#60a5fa")
-        self.console.log(f"<b>[INPUT]</b> Output Path: {output}", color="#60a5fa")
-        self.console.log(f"<b>[INPUT]</b> Text Length: {len(text)} characters", color="#60a5fa")
+            self.console.log(f"Speaker Ref: {speaker}", log_type=LogType.INPUT)
+        self.console.log(f"Output Path: {output}", log_type=LogType.INPUT)
+        self.console.log(f"Text Length: {len(text)} characters", log_type=LogType.INPUT)
 
 
     def __on_model_changed(self):
@@ -185,7 +203,7 @@ class MainWindow(QWidget):
         if not model_name:
             return
             
-        self.console.log(f"<b>[STATUS]</b> Downloading and probing {model_name}...", color="#facc15")
+        self.console.log(f"Downloading and probing {model_name}...", log_type=LogType.STATUS)
         self.btn_load_metadata.setText("Downloading & Probing...")
         self.btn_load_metadata.setEnabled(False)
         
@@ -193,13 +211,13 @@ class MainWindow(QWidget):
         self.fetcher = MetadataFetcher(model_name)
         self.fetcher.finished.connect(self.__on_metadata_fetched)
         self.fetcher.error.connect(self.__on_metadata_error)
-        self.fetcher.log_signal.connect(lambda msg, rep: self.console.log(msg, color=("#9ca3af" if "</b>" not in msg else "#00ff00"), replace=rep, is_lib=("</b>" not in msg)))
+        self.fetcher.log_signal.connect(self.__handle_log_signal)
         self.fetcher.start()
 
     def __on_metadata_fetched(self, model_name, speaker_type, is_multilingual, speakers, languages):
         model_meta_data_cache.update_model_metadata(model_name, speaker_type, is_multilingual, speakers, languages)
         
-        self.console.log(f"<b>[STATUS]</b> Download and analysis complete for {model_name}:", color="#4ade80")
+        self.console.log(f"Download and analysis complete for {model_name}:", log_type=LogType.STATUS)
         self.console.log(f" &nbsp;&bull; Speaker Type: {speaker_type}", color="#4ade80")
         self.console.log(f" &nbsp;&bull; Multilingual: {is_multilingual}", color="#4ade80")
         self.console.log(f" &nbsp;&bull; Speakers: {len(speakers)} found", color="#4ade80")
@@ -215,7 +233,7 @@ class MainWindow(QWidget):
             self.__on_model_changed()
 
     def __on_metadata_error(self, err):
-        self.console.log(f"<b>[ERROR]</b> Metadata probe failed: {err}", color="#f87171")
+        self.console.log(f"Metadata probe failed: {err}", log_type=LogType.ERROR)
         QMessageBox.warning(self, "Load Error", f"Could not load model metadata:\n{err}")
         self.__on_model_changed()
 
@@ -259,12 +277,12 @@ class MainWindow(QWidget):
 
     def __on_tts_finished(self, output_path):
         self.btn_generate.setEnabled(True)
-        self.console.log(f"<b>[OUTPUT]</b> Success! Generated: {os.path.basename(output_path)}", color="#4ade80")
+        self.console.log(f"Success! Generated: {os.path.basename(output_path)}", log_type=LogType.OUTPUT)
         QMessageBox.information(self, "Success", f"Speech generated successfully:\n{output_path}")
 
     def __on_tts_error(self, error_msg):
         self.btn_generate.setEnabled(True)
-        self.console.log(f"<b>[ERROR]</b> {error_msg}", color="#f87171")
+        self.console.log(error_msg, log_type=LogType.ERROR)
         QMessageBox.critical(self, "Error", f"An error occurred:\n{error_msg}")
 
     def __add_text_input_field(self, layout):

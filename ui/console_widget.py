@@ -1,5 +1,25 @@
+from enum import Enum, auto
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QTextEdit
 from PyQt6.QtGui import QTextCursor
+
+class LogType(Enum):
+    NONE = auto()
+    LIB = auto()
+    STATUS = auto()
+    INPUT = auto()
+    OUTPUT = auto()
+    ERROR = auto()
+    PROG = auto()
+
+LOG_TYPE_COLORS = {
+    LogType.NONE: "#00ff00", # Default Green
+    LogType.LIB: "#9ca3af",   # Gray
+    LogType.STATUS: "#facc15", # Yellow
+    LogType.INPUT: "#60a5fa",  # Blue
+    LogType.OUTPUT: "#4ade80", # Bright Green
+    LogType.ERROR: "#f87171",  # Red
+    LogType.PROG: "#f97316",   # Vibrant Orange
+}
 
 class ConsoleWidget(QWidget):
     def __init__(self, parent=None):
@@ -27,17 +47,24 @@ class ConsoleWidget(QWidget):
         """)
         layout.addWidget(self.console_output)
 
-    def log(self, message, color="#00ff00", replace=False, is_lib=False):
+    def log(self, message, color=None, replace=False, log_type=LogType.NONE):
         """Append a message to the console window. If replace=True, replaces the last block."""
         
-        if is_lib:
-            # 1. Escape HTML special characters in the raw library message content
-            # This prevents characters like < and > in progress bars from being eaten by Qt's HTML renderer
+        # Determine Color
+        if color is None:
+            color = LOG_TYPE_COLORS.get(log_type, LOG_TYPE_COLORS[LogType.NONE])
+
+        # 1. Handle Prefixes and Escaping
+        if log_type == LogType.LIB:
+            # Escape HTML special characters for library output
             clean_msg = message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             formatted_msg = f'<b>[LIB]</b> {clean_msg}'
+        elif log_type != LogType.NONE:
+            # Prepend bold prefix for internal types
+            prefix = log_type.name
+            formatted_msg = f'<b>[{prefix}]</b> {message}'
         else:
-            # For non-lib messages (status logs), we assume they may contain intentional HTML tags
-            # like <b>[STATUS]</b> or <i>Note:</i>
+            # No prefix, use raw message
             formatted_msg = message
 
         cursor = self.console_output.textCursor()
@@ -50,12 +77,10 @@ class ConsoleWidget(QWidget):
             
             if cursor.hasSelection():
                 # OVERWRITE the selected block using insertHtml
-                # Only set the color; the font-family is inherited from the widget stylesheet
                 cursor.insertHtml(f'<span style="color: {color};">{formatted_msg}</span>')
                 return
 
-        # Use append() for normal logs. Removing the redundant font-family
-        # allows the widget stylesheet to handle it, making bold/italic inheritance more reliable.
+        # Use append() for normal logs to ensure they start on a new line
         self.console_output.append(f'<span style="color: {color};">{formatted_msg}</span>')
         
         # Auto-scroll to bottom

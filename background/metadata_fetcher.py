@@ -22,7 +22,7 @@ class MetadataFetcher(QThread):
             sys.stdout = StreamRedirector(self.log_signal)
             sys.stderr = sys.stdout
 
-            self.log_signal.emit(f"<b>[STATUS]</b> Initializing engine and downloading model if needed...", False)
+            self.log_signal.emit(f"[STATUS] Initializing engine and downloading model if needed...", False)
 
             # Initialize TTS once to query all metadata
             # cpu=True/gpu=False for speed since we are only peeking at metadata
