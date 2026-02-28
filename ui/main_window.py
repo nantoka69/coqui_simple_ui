@@ -213,7 +213,7 @@ class MainWindow(QWidget):
             return
             
         self.console.log(f"Downloading and probing {model_name}...", log_type=LogType.STATUS)
-        self.btn_load_metadata.setText("Downloading & Probing...")
+        self.btn_load_metadata.setText("Downloading ...")
         self.btn_load_metadata.setEnabled(False)
         
         # Combined Fetcher
