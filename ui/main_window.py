@@ -68,6 +68,8 @@ class MainWindow(QWidget):
             self.console.log(msg[8:], replace=replace, log_type=LogType.ERROR)
         elif msg.startswith("[WARNING] "):
             self.console.log(msg, replace=replace) # Keep prefix for warnings
+        elif msg.startswith("[LIB] "):
+            self.console.log(msg[6:], replace=replace, log_type=LogType.LIB)
         else:
             # Typical tqdm bars have '|' followed by a bar character (-123456789#) and contain '%'
             is_probably_progress = ("%" in msg) and bool(re.search(r'\|[-1-9#]', msg)) 

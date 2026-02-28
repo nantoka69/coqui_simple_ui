@@ -64,9 +64,7 @@ class ConsoleWidget(QWidget):
             clean_msg = message
 
         # 2. Handle Prefixes
-        if log_type == LogType.LIB:
-            formatted_msg = f'<b>[LIB]</b> {clean_msg}'
-        elif log_type != LogType.NONE:
+        if log_type != LogType.NONE:
             # Prepend bold prefix for internal types
             prefix = log_type.name
             formatted_msg = f'<b>[{prefix}]</b> {clean_msg}'
