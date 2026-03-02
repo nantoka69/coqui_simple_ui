@@ -3,7 +3,7 @@ import re
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, 
                              QTextEdit, QPushButton, QLabel, QMessageBox, 
                              QComboBox, QFileDialog, QLineEdit, QFormLayout,
-                             QStackedWidget, QGridLayout)
+                             QStackedWidget, QGridLayout, QCheckBox)
 from . import settings, model_meta_data_cache
 from .console_widget import ConsoleWidget, LogType
 from background.metadata_fetcher import MetadataFetcher
@@ -28,6 +28,7 @@ class MainWindow(QWidget):
         layout = QVBoxLayout()
 
         self.__add_text_input_field(layout)
+        self.__add_split_lines_checkbox(layout)
 
         # Settings Grid
         grid_layout = QGridLayout()
@@ -97,6 +98,7 @@ class MainWindow(QWidget):
 
         info = model_meta_data_cache.get_model_info(model)
         is_multilingual = info["is_multilingual"]
+        split_lines = self.check_split_lines.isChecked()
         output = self.edit_output.text().strip()
 
         # Explicit validation for missing multi-speaker selection
@@ -120,7 +122,7 @@ class MainWindow(QWidget):
         self.console.log("Initializing TTS Engine...", log_type=LogType.STATUS, is_rich_text=True)
         self.console.log("Note: External WAV takes precedence over internal ID.", color="#9ca3af")
 
-        self.worker = TTSWorker(text, model, vocoder, speaker_wav, speaker_id, language, is_multilingual, output)
+        self.worker = TTSWorker(text, model, vocoder, speaker_wav, speaker_id, language, is_multilingual, split_lines, output)
         self.worker.finished.connect(self.__on_tts_finished)
         self.worker.error.connect(self.__on_tts_error)
         self.worker.log_signal.connect(self.__handle_log_signal)
@@ -394,6 +396,24 @@ class MainWindow(QWidget):
 
     def __on_external_speaker_changed(self):
         settings.set_setting("last_external_speaker_path", self.edit_speaker.text().strip())
+
+    def __add_split_lines_checkbox(self, layout):
+        self.check_split_lines = QCheckBox("Split lines")
+        
+        # Default to True, but restore from settings if available
+        saved_split = settings.get_setting("split_lines", True)
+        self.check_split_lines.setChecked(saved_split)
+        self.check_split_lines.toggled.connect(self.__on_split_lines_toggled)
+        
+        # Add to main layout (QVBoxLayout automatically aligns left by default if specified or no stretch)
+        # We can also wrap it in a QHBoxLayout if we want to be explicit about left alignment
+        cb_layout = QHBoxLayout()
+        cb_layout.addWidget(self.check_split_lines)
+        cb_layout.addStretch()
+        layout.addLayout(cb_layout)
+
+    def __on_split_lines_toggled(self, checked):
+        settings.set_setting("split_lines", checked)
 
     def __add_output_file_section(self, grid_layout, row):
         output_layout = QHBoxLayout()

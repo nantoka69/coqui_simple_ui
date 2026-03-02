@@ -10,7 +10,7 @@ class TTSWorker(QThread):
     error = pyqtSignal(str)
     log_signal = pyqtSignal(str, bool) # Added bool for 'replace last line'
 
-    def __init__(self, text, model_name, vocoder_name, speaker_wav, speaker_id, language, is_multilingual, output_path):
+    def __init__(self, text, model_name, vocoder_name, speaker_wav, speaker_id, language, is_multilingual, split_lines, output_path):
         super().__init__()
         self.text = text
         self.model_name = model_name
@@ -19,6 +19,7 @@ class TTSWorker(QThread):
         self.speaker_id = speaker_id
         self.language = language
         self.is_multilingual = is_multilingual
+        self.split_lines = split_lines
         self.output_path = output_path
 
     def run(self):
@@ -35,7 +36,10 @@ class TTSWorker(QThread):
             
             tts = TTS(model_name=self.model_name, vocoder_path=self.vocoder_name if self.vocoder_name else None)
             
-            sentences = self.__split_into_sentences(self.text)
+            if self.split_lines:
+                sentences = self.__split_into_sentences(self.text)
+            else:
+                sentences = [self.text.strip()]
             
             total = len(sentences)
             self.log_signal.emit(f"[STATUS] Identified {total} segments for processing.", False)
