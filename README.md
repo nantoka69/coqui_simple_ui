@@ -69,3 +69,7 @@ Run **`run_app.vbs`**. This will launch the application without any command wind
 - Python 3.9+ (Python 3.10 recommended for Coqui TTS)
 - PyQt6 6.10.2
 - Coqui TTS
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
